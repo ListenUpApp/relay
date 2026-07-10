@@ -27,4 +27,21 @@ describe("RateLimiter", () => {
     rl.prune();
     expect(rl.size).toBe(0);
   });
+  it("retains a key on partial prune when one stamp is still live", () => {
+    let now = 0;
+    const rl = new RateLimiter({ limit: 2, windowMs: 1000, clock: () => now });
+    expect(rl.tryAcquire("k")).toBe(true); // stamp at 0, will fall outside the window
+    now = 900;
+    expect(rl.tryAcquire("k")).toBe(true); // stamp at 900, still live at now=1500
+    now = 1500;
+    rl.prune();
+    expect(rl.size).toBe(1); // key retained — the 900 stamp is still within the window
+    expect(rl.tryAcquire("k")).toBe(true); // only one live stamp, so a second acquire succeeds
+  });
+  it("defaults to Date.now when no clock is injected", () => {
+    const rl = new RateLimiter({ limit: 1, windowMs: 1000 });
+    expect(rl.tryAcquire("k")).toBe(true);
+    expect(rl.tryAcquire("k")).toBe(false);
+    expect(rl.size).toBe(1);
+  });
 });
