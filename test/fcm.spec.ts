@@ -1,6 +1,24 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { FcmClient } from "../src/fcm";
 import { makeTestServiceAccount, fakeFetch, tokenResponse } from "./helpers";
+
+describe("FcmClient default fetch", () => {
+  it("resolves the global fetch at call time (regression: bare-reference default threw Illegal invocation in workerd)", async () => {
+    const { json } = await makeTestServiceAccount();
+    const fcm = new FcmClient(json); // DEFAULT fetchFn — the production construction path
+    // Stub AFTER construction: a capture-at-construction default would bypass this stub
+    // (and, invoked as `this.fetchFn`, the bare global throws a synchronous
+    // "Illegal invocation"), sending every real-world verdict to "retryable".
+    const upstream = fakeFetch([tokenResponse(), new Response("{}", { status: 200 })]);
+    vi.stubGlobal("fetch", upstream.fn);
+    try {
+      expect(await fcm.send("tok", { t: 1 })).toBe("delivered");
+      expect(upstream.requests).toHaveLength(2);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+});
 
 describe("FcmClient auth", () => {
   it("exchanges a signed JWT for an access token and caches it", async () => {

@@ -32,7 +32,10 @@ export class FcmClient {
   private readonly fetchFn: typeof fetch;
   private cached: { token: string; expiresAt: number } | null = null;
 
-  constructor(serviceAccountJson: string, fetchFn: typeof fetch = fetch) {
+  // Default resolves the global fetch at CALL time via an arrow wrapper: storing the bare
+  // `fetch` reference and invoking it as `this.fetchFn(...)` re-binds `this` to the client
+  // instance, which the Workers runtime rejects with a synchronous "Illegal invocation".
+  constructor(serviceAccountJson: string, fetchFn: typeof fetch = (input, init) => fetch(input, init)) {
     this.account = JSON.parse(serviceAccountJson) as ServiceAccount;
     this.fetchFn = fetchFn;
   }
