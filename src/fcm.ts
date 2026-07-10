@@ -1,3 +1,5 @@
+import type { Verdict } from "./types";
+
 interface ServiceAccount {
   project_id: string;
   private_key: string;
@@ -79,5 +81,27 @@ export class FcmClient {
     const body = (await res.json()) as { access_token: string; expires_in: number };
     this.cached = { token: body.access_token, expiresAt: now + body.expires_in * 1000 };
     return body.access_token;
+  }
+
+  /** Sends one data-only message. Never throws for delivery outcomes — returns a Verdict. */
+  async send(token: string, payload: Record<string, unknown>, collapseKey?: string): Promise<Verdict> {
+    let accessToken: string;
+    try {
+      accessToken = await this.accessToken();
+    } catch {
+      return "retryable"; // auth infra hiccup: caller may retry the whole send
+    }
+    const android: Record<string, unknown> = { priority: "HIGH" };
+    if (collapseKey !== undefined) android.collapse_key = collapseKey;
+    const res = await this.fetchFn(`https://fcm.googleapis.com/v1/projects/${this.projectId}/messages:send`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${accessToken}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        message: { token, data: { payload: JSON.stringify(payload) }, android },
+      }),
+    });
+    if (res.ok) return "delivered";
+    if (res.status === 429 || res.status >= 500) return "retryable";
+    return "invalid"; // 400/403/404: bad/unregistered/mismatched token
   }
 }

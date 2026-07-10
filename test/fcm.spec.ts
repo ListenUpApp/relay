@@ -41,3 +41,48 @@ describe("FcmClient auth", () => {
     expect(verified).toBe(true);
   });
 });
+
+describe("FcmClient send", () => {
+  it("sends a HIGH-priority data message and maps 200 → delivered", async () => {
+    const { json } = await makeTestServiceAccount();
+    const upstream = fakeFetch([
+      tokenResponse(),
+      new Response(JSON.stringify({ name: "projects/test-project/messages/1" }), { status: 200 }),
+    ]);
+    const fcm = new FcmClient(json, upstream.fn);
+    const verdict = await fcm.send("tok-1", { type: "test" }, "ck-1");
+    expect(verdict).toBe("delivered");
+    expect(upstream.requests[1].url).toBe("https://fcm.googleapis.com/v1/projects/test-project/messages:send");
+    const sentBody = JSON.parse(upstream.requests[1].body!);
+    expect(sentBody.message.token).toBe("tok-1");
+    expect(sentBody.message.android.priority).toBe("HIGH");
+    expect(sentBody.message.android.collapse_key).toBe("ck-1");
+    expect(JSON.parse(sentBody.message.data.payload)).toEqual({ type: "test" });
+    expect(sentBody.message.notification).toBeUndefined(); // data-only, ALWAYS
+  });
+
+  it("omits collapse_key when not provided", async () => {
+    const { json } = await makeTestServiceAccount();
+    const upstream = fakeFetch([tokenResponse(), new Response("{}", { status: 200 })]);
+    const fcm = new FcmClient(json, upstream.fn);
+    await fcm.send("tok", { t: 1 });
+    expect(JSON.parse(upstream.requests[1].body!).message.android.collapse_key).toBeUndefined();
+  });
+
+  it.each([
+    [404, "invalid"], [400, "invalid"], [403, "invalid"],
+    [429, "retryable"], [500, "retryable"], [503, "retryable"],
+  ])("maps FCM %i → %s", async (status, expected) => {
+    const { json } = await makeTestServiceAccount();
+    const upstream = fakeFetch([tokenResponse(), new Response("{}", { status: status as number })]);
+    const fcm = new FcmClient(json, upstream.fn);
+    expect(await fcm.send("tok", { t: 1 })).toBe(expected);
+  });
+
+  it("returns retryable when the token exchange itself fails", async () => {
+    const { json } = await makeTestServiceAccount();
+    const upstream = fakeFetch([new Response("denied", { status: 500 })]);
+    const fcm = new FcmClient(json, upstream.fn);
+    expect(await fcm.send("tok", { t: 1 })).toBe("retryable");
+  });
+});
