@@ -21,8 +21,9 @@ function pemToPkcs8(pem: string): ArrayBuffer {
 }
 
 /**
- * Exchanges a Google service-account key for an FCM OAuth access token.
- * Signs an RS256 JWT with WebCrypto and trades it for an access token at
+ * FCM v1 client: mints OAuth access tokens from a Google service-account key
+ * and sends data-only messages.
+ * Auth signs an RS256 JWT with WebCrypto and trades it for an access token at
  * the account's token_uri, caching the result for the token's lifetime
  * (isolate-local, ephemeral — never persisted).
  */
@@ -83,7 +84,12 @@ export class FcmClient {
     return body.access_token;
   }
 
-  /** Sends one data-only message. Never throws for delivery outcomes — returns a Verdict. */
+  /**
+   * Sends one data-only message.
+   * - Token-exchange failures are normalized to `"retryable"` — never thrown.
+   * - Transport failures on the send POST itself (network error, timeout) propagate
+   *   to the caller; the /v1/send handler is responsible for catching and mapping them.
+   */
   async send(token: string, payload: Record<string, unknown>, collapseKey?: string): Promise<Verdict> {
     let accessToken: string;
     try {
@@ -102,6 +108,6 @@ export class FcmClient {
     });
     if (res.ok) return "delivered";
     if (res.status === 429 || res.status >= 500) return "retryable";
-    return "invalid"; // 400/403/404: bad/unregistered/mismatched token
+    return "invalid"; // any other non-ok (400/401/403/404/...): treat token as invalid
   }
 }

@@ -85,4 +85,11 @@ describe("FcmClient send", () => {
     const fcm = new FcmClient(json, upstream.fn);
     expect(await fcm.send("tok", { t: 1 })).toBe("retryable");
   });
+
+  it("propagates transport errors from the send POST itself", async () => {
+    const { json } = await makeTestServiceAccount();
+    const upstream = fakeFetch([tokenResponse(), new Error("network down")]);
+    const fcm = new FcmClient(json, upstream.fn);
+    await expect(fcm.send("tok", { t: 1 })).rejects.toThrow("network down");
+  });
 });
