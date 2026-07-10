@@ -20,7 +20,9 @@ export function validateSendRequest(body: unknown): Validation {
     if (typeof t !== "object" || t === null) return bad("token entries must be objects");
     const { platform, token } = t as Record<string, unknown>;
     if (platform !== "android" && platform !== "ios") return bad("platform must be android|ios");
-    if (typeof token !== "string" || token.length === 0 || token.length > MAX_TOKEN_LENGTH) return bad("bad token");
+    if (typeof token !== "string" || token.length === 0 || token.length > MAX_TOKEN_LENGTH) {
+      return bad(`token must be a non-empty string ≤ ${MAX_TOKEN_LENGTH} chars`);
+    }
     tokens.push({ platform, token });
   }
 
@@ -31,7 +33,9 @@ export function validateSendRequest(body: unknown): Validation {
 
   let collapseKey: string | undefined;
   if (b.collapseKey !== undefined) {
-    if (typeof b.collapseKey !== "string" || b.collapseKey.length > MAX_COLLAPSE_KEY_LENGTH) return bad("bad collapseKey");
+    if (typeof b.collapseKey !== "string" || b.collapseKey.length > MAX_COLLAPSE_KEY_LENGTH) {
+      return bad(`collapseKey must be a string ≤ ${MAX_COLLAPSE_KEY_LENGTH} chars`);
+    }
     collapseKey = b.collapseKey;
   }
 
