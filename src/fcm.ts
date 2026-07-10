@@ -107,7 +107,7 @@ export class FcmClient {
       }),
     });
     if (res.ok) return "delivered";
-    if (res.status === 429 || res.status >= 500) return "retryable";
-    return "invalid"; // any other non-ok (400/401/403/404/...): treat token as invalid
+    if (res.status === 401 || res.status === 429 || res.status >= 500) return "retryable"; // 401 = OUR auth, not the device token
+    return "invalid"; // other non-ok (400/403/404): the device token itself is bad
   }
 }

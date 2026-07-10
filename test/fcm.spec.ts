@@ -71,7 +71,7 @@ describe("FcmClient send", () => {
 
   it.each([
     [404, "invalid"], [400, "invalid"], [403, "invalid"],
-    [429, "retryable"], [500, "retryable"], [503, "retryable"],
+    [401, "retryable"], [429, "retryable"], [500, "retryable"], [503, "retryable"],
   ])("maps FCM %i → %s", async (status, expected) => {
     const { json } = await makeTestServiceAccount();
     const upstream = fakeFetch([tokenResponse(), new Response("{}", { status: status as number })]);

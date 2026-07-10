@@ -63,12 +63,20 @@ contacted.
 |---|---|---|
 | Tokens per request | 20 | `400` |
 | Token length | 4096 chars | `400` |
-| Serialized payload size | 4096 bytes (UTF-8) | `413` |
+| Serialized payload size | 3800 bytes (UTF-8) | `413` |
 | `collapseKey` length | 64 chars | `400` |
 
 All other malformed-request cases (missing/wrong-typed fields, unknown
 `platform`, non-JSON body, non-object payload, empty token array) are `400`.
 Only the payload-size cap is `413`.
+
+The payload cap is set below FCM's own 4096-byte data-map limit (3800, not
+4096) to leave headroom for the `"payload"` key and JSON envelope overhead
+added when the relay wraps the caller's payload under
+`message.data.payload` — see FCM mapping below. Without that headroom, a
+payload that passes this cap could still be rejected by FCM itself with a
+`400`, which the relay would otherwise map to `invalid` and wrongly cause
+the caller to delete a perfectly good device token.
 
 ## HTTP statuses
 
@@ -76,7 +84,7 @@ Only the payload-size cap is `413`.
 |---|---|
 | `200` | Request accepted; body carries a per-token verdict for each token (see below). Individual tokens can still fail — a `200` does not mean every token delivered. |
 | `400` | Request body isn't valid JSON, or fails validation (see Caps above and the general shape rules). |
-| `413` | `payload` serializes to more than 4096 bytes. |
+| `413` | `payload` serializes to more than 3800 bytes. |
 | `429` | Per-IP rate limit exceeded. Response has no body and a `Retry-After` header (seconds, currently a fixed `3600`). This is enforced *before* the body is parsed. |
 | `404` | Unknown route or method. Empty body. |
 
@@ -92,7 +100,7 @@ contract callers build retry/eviction logic against:
 |---|---|---|
 | `delivered` | Provider accepted the message for delivery. | None. |
 | `invalid` | The token is permanently unusable (unregistered, malformed, wrong sender, etc.). | **MUST** delete the token — it will never succeed. |
-| `retryable` | Transient failure: could be the relay's own per-token rate limit, a provider-side rate limit or 5xx, or a transport failure reaching the provider (including OAuth token-exchange failures for FCM). | **MAY** retry once. Do not spin-retry; if it fails again, treat as an operational issue, not a token problem. |
+| `retryable` | Transient failure: could be the relay's own per-token rate limit, a provider-side rate limit or 5xx, a provider auth failure that is the *relay's* fault rather than the device token's (e.g. FCM `401`), or a transport failure reaching the provider (including OAuth token-exchange failures for FCM). | **MAY** retry once. Do not spin-retry; if it fails again, treat as an operational issue, not a token problem. |
 | `unsupported` | The relay has no delivery path for this token's platform yet. Currently: every `platform: "ios"` token, because APNs forwarding isn't implemented. | Keep the token. Do not retry — retrying will not change the outcome until the relay adds support. |
 
 A per-token rate limit (see caps in the README) that trips mid-request
@@ -119,8 +127,10 @@ consistent semantics; it is not required by the wire protocol above.
   when provided; omitted entirely otherwise.
 - Response status mapping:
   - `2xx` → `delivered`
-  - `429` or `5xx` → `retryable`
-  - any other non-2xx (e.g. `400`, `401`, `403`, `404`) → `invalid`
+  - `401`, `429`, or `5xx` → `retryable` (`401` means the relay's own OAuth
+    token is bad — a credential blip or key rotation, not a defect in the
+    device token — so it must never cause the caller to delete the token)
+  - any other non-2xx (e.g. `400`, `403`, `404`) → `invalid`
   - OAuth token-exchange failure, or a network-level failure on the send
     request itself → `retryable`
 

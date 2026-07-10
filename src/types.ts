@@ -19,5 +19,5 @@ export interface SendResponse {
 
 export const MAX_TOKENS = 20;
 export const MAX_TOKEN_LENGTH = 4096;
-export const MAX_PAYLOAD_BYTES = 4096;
+export const MAX_PAYLOAD_BYTES = 3800; // headroom under FCM's 4096-byte data-map limit (key + envelope overhead)
 export const MAX_COLLAPSE_KEY_LENGTH = 64;
