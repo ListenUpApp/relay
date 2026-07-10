@@ -1,7 +1,7 @@
 {
   "name": "relay",
   "main": "src/index.ts",
-  "compatibility_date": "2026-07-01"
+  "compatibility_date": "2026-07-01",
   // Secrets (never here): FCM_SERVICE_ACCOUNT via `wrangler secret put`.
-  // Custom domain (push.listenup.audio) attached in the dashboard or via "routes" at deploy time.
+  "routes": [{ "pattern": "push.listenup.audio", "custom_domain": true }]
 }
