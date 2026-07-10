@@ -44,12 +44,13 @@ async function handleSend(request: Request, env: Env): Promise<Response> {
   const v = validateSendRequest(body);
   if (!v.ok) return Response.json({ error: v.message }, { status: v.status });
 
+  const fcmClient = fcm;
   const results: SendResponse["results"] = [];
   for (const t of v.value.tokens) {
     let status: Verdict;
     if (!tokenLimiter.tryAcquire(t.token)) status = "retryable";
     else if (t.platform === "ios") status = sendApns();
-    else status = await sendFcm(t.token, v.value.payload, v.value.collapseKey);
+    else status = await sendFcm(fcmClient, t.token, v.value.payload, v.value.collapseKey);
     results.push({ token: t.token, status });
   }
   ipLimiter.prune();
@@ -58,15 +59,20 @@ async function handleSend(request: Request, env: Env): Promise<Response> {
 }
 
 /** FcmClient.send propagates transport throws (documented contract) — map them here, without logging anything request-derived. */
-async function sendFcm(token: string, payload: Record<string, unknown>, collapseKey?: string): Promise<Verdict> {
+async function sendFcm(
+  client: FcmClient,
+  token: string,
+  payload: Record<string, unknown>,
+  collapseKey?: string,
+): Promise<Verdict> {
   try {
-    return await fcm!.send(token, payload, collapseKey);
+    return await client.send(token, payload, collapseKey);
   } catch {
     return "retryable"; // transport failure reaching Google — caller may retry
   }
 }
 
-function intEnv(raw: string | undefined, fallback: number): number {
+export function intEnv(raw: string | undefined, fallback: number): number {
   const n = raw === undefined ? NaN : parseInt(raw, 10);
   return Number.isFinite(n) && n > 0 ? n : fallback;
 }

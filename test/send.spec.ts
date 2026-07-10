@@ -147,6 +147,25 @@ describe("POST /v1/send", () => {
     expect(last?.headers.get("retry-after")).toBe("3600");
   });
 
+  it("an already rate-limited ios token yields retryable, not unsupported", async () => {
+    // RATE_LIMIT_PER_TOKEN is bound to "2" for tests. Send the same ios token
+    // three times in one request: the first two clear the token limiter and
+    // fall through to the (unimplemented) APNs path → "unsupported"; the third
+    // is rate-limited before APNs is ever consulted → "retryable".
+    const res = await send("10.0.1.6", {
+      tokens: [
+        { platform: "ios", token: "ios-rl-tok" },
+        { platform: "ios", token: "ios-rl-tok" },
+        { platform: "ios", token: "ios-rl-tok" },
+      ],
+      payload: { n: 1 },
+    });
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { results: { token: string; status: string }[] };
+    expect(body.results.map((r) => r.status)).toEqual(["unsupported", "unsupported", "retryable"]);
+  });
+
   it("per-token rate limit yields retryable for that token, while another token still delivers", async () => {
     // RATE_LIMIT_PER_TOKEN is bound to "2" for tests. Send the same token three
     // times in one request (plus a distinct token) to exercise the limiter
