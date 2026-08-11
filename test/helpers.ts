@@ -17,6 +17,19 @@ export async function makeTestServiceAccount(): Promise<{ json: string; publicKe
   return { json, publicKey: pair.publicKey };
 }
 
+/** Throwaway P-256 keypair in the `.p8` PEM shape APNs provider keys use. */
+export async function makeTestApnsKey(): Promise<{ pem: string; publicKey: CryptoKey }> {
+  const pair = (await crypto.subtle.generateKey(
+    { name: "ECDSA", namedCurve: "P-256" },
+    true,
+    ["sign", "verify"],
+  )) as CryptoKeyPair;
+  const pkcs8 = (await crypto.subtle.exportKey("pkcs8", pair.privateKey)) as ArrayBuffer;
+  const b64 = btoa(String.fromCharCode(...new Uint8Array(pkcs8)));
+  const pem = `-----BEGIN PRIVATE KEY-----\n${b64.match(/.{1,64}/g)!.join("\n")}\n-----END PRIVATE KEY-----\n`;
+  return { pem, publicKey: pair.publicKey };
+}
+
 export interface RecordedRequest {
   url: string;
   method: string;

@@ -33,16 +33,35 @@ deploy your own instance.
    # paste the full service-account JSON when prompted
    ```
 
-3. Deploy:
+3. **iOS (optional):** to deliver to iOS devices too, add APNs provider
+   credentials — an APNs auth key (`.p8`) from the Apple developer portal
+   (Certificates, Identifiers & Profiles → Keys), plus its ids:
+
+   ```sh
+   npx wrangler secret put APNS_KEY        # paste the full .p8 PEM contents
+   npx wrangler secret put APNS_KEY_ID     # the 10-char key id
+   npx wrangler secret put APNS_TEAM_ID    # the 10-char team id
+   npx wrangler secret put APNS_BUNDLE_ID  # your app's bundle id (apns-topic)
+   ```
+
+   Optional vars: `APNS_ENVIRONMENT` (`production` default, or
+   `development` for sandbox tokens — one deployment serves one
+   environment), and `APNS_TITLE_LOC_KEY` / `APNS_BODY_LOC_KEY` (the
+   constant localization keys placed in the alert envelope; defaults
+   `push_generic_title` / `push_generic_body` — they must exist in your
+   app's string catalog). Without the APNs secrets, `ios` tokens simply
+   return `unsupported` (see PROTOCOL.md).
+
+4. Deploy:
 
    ```sh
    npm run deploy
    ```
 
-4. Attach a custom domain (Cloudflare dashboard → your Worker → Settings →
+5. Attach a custom domain (Cloudflare dashboard → your Worker → Settings →
    Domains & Routes, or configure `routes` in `wrangler.jsonc` at deploy
    time). Point your self-hosted app's push config at that domain.
-5. **Recommended:** add a Cloudflare WAF rate rule in front of the Worker as
+6. **Recommended:** add a Cloudflare WAF rate rule in front of the Worker as
    a hard rate-limit backstop — see [Rate limiting](#rate-limiting) below
    for why the in-Worker limiter alone isn't sufficient defense-in-depth.
 

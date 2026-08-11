@@ -101,7 +101,7 @@ contract callers build retry/eviction logic against:
 | `delivered` | Provider accepted the message for delivery. | None. |
 | `invalid` | The token is permanently unusable (unregistered, malformed, wrong sender, etc.). | **MUST** delete the token — it will never succeed. |
 | `retryable` | Transient failure: could be the relay's own per-token rate limit, a provider-side rate limit or 5xx, a provider auth failure that is the *relay's* fault rather than the device token's (e.g. FCM `401`), or a transport failure reaching the provider (including OAuth token-exchange failures for FCM). | **MAY** retry once. Do not spin-retry; if it fails again, treat as an operational issue, not a token problem. |
-| `unsupported` | The relay has no delivery path for this token's platform yet. Currently: every `platform: "ios"` token, because APNs forwarding isn't implemented. | Keep the token. Do not retry — retrying will not change the outcome until the relay adds support. |
+| `unsupported` | The relay has no delivery path for this token's platform. Currently: `platform: "ios"` tokens on a deployment whose APNs secrets aren't configured. | Keep the token. Do not retry — retrying will not change the outcome until the relay deployment adds support. |
 
 A per-token rate limit (see caps in the README) that trips mid-request
 produces `retryable` for that token's entry — it does **not** fail the whole
@@ -150,14 +150,43 @@ must not be persisted to disk or any external store, and must not be
 derivable back into the tokens/IPs they were computed from beyond the
 lifetime of the process.
 
-## Future / reserved
+## APNs mapping (normative for this implementation)
 
-- **APNs.** iOS delivery is reserved but unimplemented (`src/apns.ts`).
-  Every `ios` token currently returns `"unsupported"`. The planned
-  implementation is token-based `.p8` JWT auth over HTTP/2 to
-  `api.push.apple.com` — once shipped, `ios` tokens follow the same
-  `delivered` / `invalid` / `retryable` semantics as `android` above, and
-  `"unsupported"` is retired for that platform.
+This section describes exactly what this relay sends to the Apple Push
+Notification service provider API when APNs is configured (see the README
+for the `APNS_*` secrets). When it is **not** configured, every `ios` token
+returns `"unsupported"` — the pre-APNs behavior.
+
+- Auth: token-based provider authentication — an ES256 JWT signed with the
+  configured `.p8` key (`kid` = key id, `iss` = team id), cached in-memory
+  for 45 minutes (inside Apple's 20–60 minute refresh window), never
+  persisted.
+- Host: `api.push.apple.com`, or `api.sandbox.push.apple.com` when
+  `APNS_ENVIRONMENT` is `development`. One deployment serves one
+  environment — sandbox device tokens are rejected by the production host.
+- Request: `POST /3/device/{token}` with headers `apns-topic` (the
+  configured bundle id), `apns-push-type: alert`, `apns-priority: 10`, and
+  `apns-collapse-id` from the request's `collapseKey` when provided.
+- Body: the `aps` envelope carries **no composed text** — only constant
+  localization keys (`title-loc-key` / `loc-key`, configurable, default
+  `push_generic_title` / `push_generic_body`) and `mutable-content: 1`. The
+  caller's `payload` is forwarded **verbatim, serialized as a single JSON
+  string**, under a top-level `payload` key — mirroring the FCM
+  `message.data.payload` mapping. The app's notification service extension
+  decodes and enriches locally; if it never runs, iOS renders the app's own
+  localized generic strings. The relay still never composes UI text.
+- Response status mapping:
+  - `200` → `delivered`
+  - `403` → `retryable` (Invalid/ExpiredProviderToken — the relay's own
+    credential, never the device token's fault; the cached provider token is
+    dropped so the next send re-signs)
+  - `429` or `5xx` → `retryable`
+  - any other non-2xx (`400` BadDeviceToken et al., `404`, `410`
+    Unregistered) → `invalid`
+  - provider-token signing failure → `retryable`; a network-level failure on
+    the send itself → `retryable`
+
+## Future / reserved
 - **`ttl` field.** Not part of the current request shape. A future revision
   may add an optional `ttl` (seconds) field to bound how long a provider
   should hold an undeliverable message. Until it exists, providers use
