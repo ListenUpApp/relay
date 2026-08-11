@@ -1,13 +1,15 @@
 import { FcmClient } from "./fcm";
-import { sendApns } from "./apns";
+import { ApnsClient, apnsConfigFromEnv } from "./apns";
+import type { ApnsEnv } from "./apns";
 import { RateLimiter } from "./ratelimit";
 import { validateSendRequest } from "./validate";
 import type { SendResponse, Verdict } from "./types";
 
-export interface Env {
+export interface Env extends ApnsEnv {
   FCM_SERVICE_ACCOUNT: string;
   RATE_LIMIT_PER_IP?: string; // requests/hour, default 1000 (env vars arrive as strings)
   RATE_LIMIT_PER_TOKEN?: string; // sends/hour,    default 60
+  // APNS_* (all optional) are declared in ApnsEnv — absent means ios tokens stay "unsupported".
 }
 
 const HOUR_MS = 3_600_000;
@@ -15,6 +17,7 @@ const HOUR_MS = 3_600_000;
 let ipLimiter: RateLimiter | null = null;
 let tokenLimiter: RateLimiter | null = null;
 let fcm: FcmClient | null = null;
+let apns: ApnsClient | null | undefined; // undefined = not yet resolved; null = unconfigured
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
@@ -29,6 +32,10 @@ async function handleSend(request: Request, env: Env): Promise<Response> {
   ipLimiter ??= new RateLimiter({ limit: intEnv(env.RATE_LIMIT_PER_IP, 1000), windowMs: HOUR_MS });
   tokenLimiter ??= new RateLimiter({ limit: intEnv(env.RATE_LIMIT_PER_TOKEN, 60), windowMs: HOUR_MS });
   fcm ??= new FcmClient(env.FCM_SERVICE_ACCOUNT);
+  if (apns === undefined) {
+    const config = apnsConfigFromEnv(env);
+    apns = config === null ? null : new ApnsClient(config);
+  }
 
   const ip = request.headers.get("cf-connecting-ip") ?? "unknown";
   if (!ipLimiter.tryAcquire(ip)) {
@@ -45,11 +52,12 @@ async function handleSend(request: Request, env: Env): Promise<Response> {
   if (!v.ok) return Response.json({ error: v.message }, { status: v.status });
 
   const fcmClient = fcm;
+  const apnsClient = apns;
   const results: SendResponse["results"] = [];
   for (const t of v.value.tokens) {
     let status: Verdict;
     if (!tokenLimiter.tryAcquire(t.token)) status = "retryable";
-    else if (t.platform === "ios") status = sendApns();
+    else if (t.platform === "ios") status = await sendIos(apnsClient, t.token, v.value.payload, v.value.collapseKey);
     else status = await sendFcm(fcmClient, t.token, v.value.payload, v.value.collapseKey);
     results.push({ token: t.token, status });
   }
@@ -69,6 +77,21 @@ async function sendFcm(
     return await client.send(token, payload, collapseKey);
   } catch {
     return "retryable"; // transport failure reaching Google — caller may retry
+  }
+}
+
+/** ApnsClient.send propagates transport throws (same contract as FcmClient) — map them here, without logging anything request-derived. */
+async function sendIos(
+  client: ApnsClient | null,
+  token: string,
+  payload: Record<string, unknown>,
+  collapseKey?: string,
+): Promise<Verdict> {
+  if (client === null) return "unsupported"; // no APNs secrets configured on this deployment
+  try {
+    return await client.send(token, payload, collapseKey);
+  } catch {
+    return "retryable"; // transport failure reaching Apple — caller may retry
   }
 }
 
