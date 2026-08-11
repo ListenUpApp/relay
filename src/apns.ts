@@ -46,8 +46,8 @@ export function apnsConfigFromEnv(env: ApnsEnv): ApnsConfig | null {
     teamId: env.APNS_TEAM_ID,
     bundleId: env.APNS_BUNDLE_ID,
     environment: env.APNS_ENVIRONMENT === "development" ? "development" : "production",
-    titleLocKey: env.APNS_TITLE_LOC_KEY ?? "push_generic_title",
-    bodyLocKey: env.APNS_BODY_LOC_KEY ?? "push_generic_body",
+    titleLocKey: env.APNS_TITLE_LOC_KEY ?? "push.generic_title",
+    bodyLocKey: env.APNS_BODY_LOC_KEY ?? "push.generic_body",
   };
 }
 

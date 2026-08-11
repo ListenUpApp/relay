@@ -169,7 +169,7 @@ returns `"unsupported"` — the pre-APNs behavior.
   `apns-collapse-id` from the request's `collapseKey` when provided.
 - Body: the `aps` envelope carries **no composed text** — only constant
   localization keys (`title-loc-key` / `loc-key`, configurable, default
-  `push_generic_title` / `push_generic_body`) and `mutable-content: 1`. The
+  `push.generic_title` / `push.generic_body`) and `mutable-content: 1`. The
   caller's `payload` is forwarded **verbatim, serialized as a single JSON
   string**, under a top-level `payload` key — mirroring the FCM
   `message.data.payload` mapping. The app's notification service extension

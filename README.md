@@ -48,7 +48,7 @@ deploy your own instance.
    `development` for sandbox tokens — one deployment serves one
    environment), and `APNS_TITLE_LOC_KEY` / `APNS_BODY_LOC_KEY` (the
    constant localization keys placed in the alert envelope; defaults
-   `push_generic_title` / `push_generic_body` — they must exist in your
+   `push.generic_title` / `push.generic_body` — they must exist in your
    app's string catalog). Without the APNs secrets, `ios` tokens simply
    return `unsupported` (see PROTOCOL.md).
 

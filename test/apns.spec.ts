@@ -11,8 +11,8 @@ async function makeClient(overrides: Partial<ApnsConfig> = {}) {
     teamId: "TEAM123456",
     bundleId: "com.example.app",
     environment: "production",
-    titleLocKey: "push_generic_title",
-    bodyLocKey: "push_generic_body",
+    titleLocKey: "push.generic_title",
+    bodyLocKey: "push.generic_body",
     ...overrides,
   };
   return { config, publicKey };
@@ -32,8 +32,8 @@ describe("apnsConfigFromEnv", () => {
     });
     expect(full).toMatchObject({
       environment: "production",
-      titleLocKey: "push_generic_title",
-      bodyLocKey: "push_generic_body",
+      titleLocKey: "push.generic_title",
+      bodyLocKey: "push.generic_body",
     });
   });
 
@@ -106,7 +106,7 @@ describe("ApnsClient send", () => {
       aps: { alert: Record<string, string>; "mutable-content": number };
       payload: string;
     };
-    expect(body.aps.alert).toEqual({ "title-loc-key": "push_generic_title", "loc-key": "push_generic_body" });
+    expect(body.aps.alert).toEqual({ "title-loc-key": "push.generic_title", "loc-key": "push.generic_body" });
     expect(body.aps["mutable-content"]).toBe(1);
     expect(JSON.parse(body.payload)).toEqual({ type: "test", sentAtMs: 5 });
   });
