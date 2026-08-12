@@ -2,6 +2,8 @@
   "name": "relay",
   "main": "src/index.ts",
   "compatibility_date": "2026-07-01",
+  // The Cloudflare account that owns the push.listenup.audio zone.
+  "account_id": "7c67fe4bdc2d85b4a182e25d1280e1ff",
   // Secrets (never here): FCM_SERVICE_ACCOUNT via `wrangler secret put`.
   // SENDER_TOKEN (optional, phase 1 — see PROTOCOL.md "Sender credential"): the shared
   // secret every self-hosted server presents on /v1/send. Unset means every call is
