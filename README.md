@@ -23,7 +23,7 @@ deploy your own instance.
 1. Create a Firebase project for **your** app, with Cloud Messaging
    enabled, and generate a service-account key (Project settings → Service
    accounts → Generate new private key). Keep the downloaded JSON safe —
-   it's the only secret this relay needs.
+   it's the only secret this relay strictly needs.
 2. Install dependencies and set the secret:
 
    ```sh
@@ -52,16 +52,33 @@ deploy your own instance.
    app's string catalog). Without the APNs secrets, `ios` tokens simply
    return `unsupported` (see PROTOCOL.md).
 
-4. Deploy:
+4. **Recommended: authenticate your callers.** Set a shared secret every
+   self-hosted server presents as a bearer credential on `/v1/send` — see
+   [PROTOCOL.md § Sender credential](./PROTOCOL.md#sender-credential) for
+   the full two-phase (optional→mandatory) rollout and rotation guidance.
+
+   ```sh
+   npx wrangler secret put SENDER_TOKEN
+   # paste a long random value; the same value goes into every server's
+   # LISTENUP_PUSH_RELAY_TOKEN (or your fork's equivalent) env var
+   ```
+
+   Unset, every caller is currently still served (phase 1 — a request
+   without the header gets `200`, not rejected); this is a migration
+   window, not the end state. A request that *does* send the header but
+   gets it wrong is always rejected with `401`, whether or not you've set
+   this secret yet.
+
+5. Deploy:
 
    ```sh
    npm run deploy
    ```
 
-5. Attach a custom domain (Cloudflare dashboard → your Worker → Settings →
+6. Attach a custom domain (Cloudflare dashboard → your Worker → Settings →
    Domains & Routes, or configure `routes` in `wrangler.jsonc` at deploy
    time). Point your self-hosted app's push config at that domain.
-6. **Recommended:** add a Cloudflare WAF rate rule in front of the Worker as
+7. **Recommended:** add a Cloudflare WAF rate rule in front of the Worker as
    a hard rate-limit backstop — see [Rate limiting](#rate-limiting) below
    for why the in-Worker limiter alone isn't sufficient defense-in-depth.
 
@@ -76,6 +93,10 @@ with their users' push tokens. Concretely:
 - Device tokens are **never** logged or persisted.
 - Payload contents are **never** logged or persisted, and never
   interpreted — they're forwarded to the push provider as an opaque blob.
+- The sender credential (see [PROTOCOL.md § Sender
+  credential](./PROTOCOL.md#sender-credential)) is **never** logged or
+  persisted — only compared, in constant time, against the configured
+  secret.
 - Request metadata (IP, headers, etc.) is used only transiently to compute
   an in-memory rate-limit key for the current process; none of it is
   written anywhere.
@@ -83,9 +104,9 @@ with their users' push tokens. Concretely:
   rate-limit counters (per-IP, per-token), scoped to a single isolate and
   gone the moment it recycles.
 
-This is pinned by test — `test/send.spec.ts` spies on `console.log/warn/
-error/info/debug` across a real send and asserts none of them ever contain
-the request's token or payload contents.
+This is pinned by test — `test/send.spec.ts` and `test/auth.spec.ts` spy on
+`console.log/warn/error/info/debug` across a real send and assert none of
+them ever contain the request's token, payload, or sender credential.
 
 ## Rate limiting
 
@@ -107,6 +128,12 @@ put a [Cloudflare WAF rate
 rule](https://developers.cloudflare.com/waf/rate-limiting-rules/) in front
 of the Worker.
 
+Each limiter also bounds its own key space (default 10,000 distinct keys;
+the least-recently-touched key is evicted once full) and folds any key
+longer than 128 characters — device tokens can run up to ~4KB — into a
+fixed-width digest before storing it, so one caller sending many large,
+distinct keys can't grow an isolate's memory footprint without bound.
+
 One CPU-time note if you're tuning limits: `RateLimiter.prune()` runs once
 per request per limiter and is `O(active keys)` — with very high token
 cardinality and a long window, pruning cost grows with how many distinct
@@ -125,7 +152,7 @@ npm run dev      # local dev server via wrangler
 ## Protocol
 
 The wire protocol — request/response shapes, caps, HTTP statuses, verdict
-semantics, and the FCM mapping — is specified in
+semantics, sender-credential rollout, and the FCM mapping — is specified in
 [PROTOCOL.md](./PROTOCOL.md). Read it if you're implementing a client, or
 an alternative relay implementation.
 

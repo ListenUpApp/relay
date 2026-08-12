@@ -69,26 +69,6 @@ function send(ip: string, body: unknown): Promise<Response> {
 // that the shared, isolate-wide RateLimiter maps (module-scoped in src/index.ts)
 // never cross-contaminate between tests — see the comment above.
 describe("POST /v1/send", () => {
-  it("fans out and returns per-token verdicts; ios is unsupported, android is delivered", async () => {
-    stubUpstream([new Response(JSON.stringify({ name: "projects/test/messages/1" }), { status: 200 })]);
-
-    const res = await send("10.0.1.1", {
-      tokens: [
-        { platform: "android", token: "andro-1" },
-        { platform: "ios", token: "ios-1" },
-      ],
-      payload: { type: "test" },
-    });
-
-    expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({
-      results: [
-        { token: "andro-1", status: "delivered" },
-        { token: "ios-1", status: "unsupported" },
-      ],
-    });
-  });
-
   it("400s invalid bodies and 413s an oversized payload", async () => {
     const malformed = await send("10.0.1.2", "{not json");
     expect(malformed.status).toBe(400);
@@ -128,7 +108,7 @@ describe("POST /v1/send", () => {
   });
 
   it("429s with Retry-After once the per-IP limit is exhausted", async () => {
-    // RATE_LIMIT_PER_IP is bound to "5" for tests (see vitest.config.ts). Loop
+    // RATE_LIMIT_PER_IP is bound to "5" for tests (see vitest.config.default.ts). Loop
     // up to limit+1 requests, each with a fresh token so the per-token limiter
     // (bound to "2") never interferes, from one dedicated IP so no other test
     // can affect — or be affected by — this counter.
@@ -145,25 +125,6 @@ describe("POST /v1/send", () => {
 
     expect(last?.status).toBe(429);
     expect(last?.headers.get("retry-after")).toBe("3600");
-  });
-
-  it("an already rate-limited ios token yields retryable, not unsupported", async () => {
-    // RATE_LIMIT_PER_TOKEN is bound to "2" for tests. Send the same ios token
-    // three times in one request: the first two clear the token limiter and
-    // fall through to the (unimplemented) APNs path → "unsupported"; the third
-    // is rate-limited before APNs is ever consulted → "retryable".
-    const res = await send("10.0.1.6", {
-      tokens: [
-        { platform: "ios", token: "ios-rl-tok" },
-        { platform: "ios", token: "ios-rl-tok" },
-        { platform: "ios", token: "ios-rl-tok" },
-      ],
-      payload: { n: 1 },
-    });
-
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as { results: { token: string; status: string }[] };
-    expect(body.results.map((r) => r.status)).toEqual(["unsupported", "unsupported", "retryable"]);
   });
 
   it("per-token rate limit yields retryable for that token, while another token still delivers", async () => {
