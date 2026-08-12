@@ -20,6 +20,46 @@ No auth, no rate limiting, no body required.
 
 ## `POST /v1/send`
 
+### Sender credential
+
+Every self-hosted server that calls `/v1/send` presents a shared secret as a
+bearer credential:
+
+```
+Authorization: Bearer <token>
+```
+
+The relay compares it against the `SENDER_TOKEN` wrangler secret (never
+logged, compared in constant time). This is a **two-phase, optional→mandatory
+rollout**, tracked here so implementers and operators know exactly what to
+expect at each stage:
+
+| Phase | Credential absent | Credential present, wrong | Credential present, correct |
+|---|---|---|---|
+| **1 — current** | `200`, request proceeds (migration window) | `401` | `200`, request proceeds |
+| **2 — future, separate deploy** | `401` | `401` | `200`, request proceeds |
+
+Phase 1 lets every self-hosted server upgrade to sending the header on its
+own schedule without an outage — the relay accepts calls with or without it
+while operators roll the client-side change out. Phase 2 — flipping the
+"absent" column to `401` — only ships once every known caller has upgraded,
+and is deployed separately from the phase-1 relay code (never bundled with a
+client-side change, so there's no ordering hazard between the two).
+
+If the relay itself has no `SENDER_TOKEN` secret configured at all (a fresh
+deploy, or a fork that hasn't opted in yet), every call — with or without a
+header — is treated as phase-1 "absent": the check is a no-op until the
+secret is provisioned.
+
+**Rotation:** because this is a single shared secret rather than a per-server
+credential, rotating it requires coordinating both sides — set the new value
+on every server first (servers should tolerate carrying the old value for a
+transition window if you stage the rollout), then `wrangler secret put
+SENDER_TOKEN` on the relay with the new value, then confirm no `401`s appear
+in Cloudflare's request logs before considering the old value retired. There
+is no dual-secret grace window built into the relay itself (single
+`SENDER_TOKEN` binding) — plan the rotation window around that.
+
 ### Request
 
 `Content-Type: application/json`. Body:
@@ -84,12 +124,17 @@ the caller to delete a perfectly good device token.
 |---|---|
 | `200` | Request accepted; body carries a per-token verdict for each token (see below). Individual tokens can still fail — a `200` does not mean every token delivered. |
 | `400` | Request body isn't valid JSON, or fails validation (see Caps above and the general shape rules). |
+| `401` | Sender credential present but invalid (see Sender credential above). Body carries `{"error": "invalid sender credential"}`. In phase 1, an *absent* credential is `200`, not `401`. |
 | `413` | `payload` serializes to more than 3800 bytes. |
 | `429` | Per-IP rate limit exceeded. Response has no body and a `Retry-After` header (seconds, currently a fixed `3600`). This is enforced *before* the body is parsed. |
 | `404` | Unknown route or method. Empty body. |
 
 `GET /healthz` always returns `200` with `{"ok":true}` and is not rate
 limited.
+
+The sender-credential check (`401`) runs after the per-IP rate limit but
+before the request body is parsed — an invalid credential is rejected before
+any provider is contacted and before the `400`/`413` validation checks run.
 
 ## Verdict semantics
 
@@ -140,6 +185,8 @@ Implementations of this protocol **MUST NOT** persist or log:
 
 - device tokens,
 - payload contents,
+- the sender credential (the `Authorization` header value, or whatever
+  mechanism a future revision uses),
 - any other request-derived data (IP addresses, headers, etc. beyond what's
   strictly necessary to compute an in-memory rate-limit key for the
   duration of the process).
@@ -191,3 +238,7 @@ returns `"unsupported"` — the pre-APNs behavior.
   may add an optional `ttl` (seconds) field to bound how long a provider
   should hold an undeliverable message. Until it exists, providers use
   their own defaults.
+- **Sender-credential phase 2.** See "Sender credential" above — flipping an
+  absent credential from `200` to `401` is a deliberate, separate relay
+  deploy gated on every known caller having upgraded, not part of this
+  revision.

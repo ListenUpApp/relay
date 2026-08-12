@@ -36,6 +36,10 @@ export default defineConfig({
           // See test/send.spec.ts for why each test uses a dedicated IP/token namespace.
           RATE_LIMIT_PER_IP: "5",
           RATE_LIMIT_PER_TOKEN: "2",
+          // Fixed test value for the sender-credential check (test/auth.spec.ts). Existing
+          // send.spec.ts tests never send an Authorization header, so they stay "absent" and
+          // unaffected — this only activates for tests that explicitly send the header.
+          SENDER_TOKEN: "test-sender-secret",
         },
       },
     })),

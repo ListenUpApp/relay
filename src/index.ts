@@ -9,10 +9,16 @@ export interface Env extends ApnsEnv {
   FCM_SERVICE_ACCOUNT: string;
   RATE_LIMIT_PER_IP?: string; // requests/hour, default 1000 (env vars arrive as strings)
   RATE_LIMIT_PER_TOKEN?: string; // sends/hour,    default 60
+  // Sender credential for /v1/send (phase 1: optional→mandatory — see PROTOCOL.md
+  // "Sender credential"). Unset means this relay instance hasn't been provisioned
+  // with the secret yet; every call is then treated as unauthenticated ("absent"),
+  // never rejected. Set via `wrangler secret put SENDER_TOKEN`.
+  SENDER_TOKEN?: string;
   // APNS_* (all optional) are declared in ApnsEnv — absent means ios tokens stay "unsupported".
 }
 
 const HOUR_MS = 3_600_000;
+const BEARER_PREFIX = "Bearer ";
 // Module-scope: isolate-local by design. See README §Rate limiting.
 let ipLimiter: RateLimiter | null = null;
 let tokenLimiter: RateLimiter | null = null;
@@ -40,6 +46,14 @@ async function handleSend(request: Request, env: Env): Promise<Response> {
   const ip = request.headers.get("cf-connecting-ip") ?? "unknown";
   if (!ipLimiter.tryAcquire(ip)) {
     return new Response(null, { status: 429, headers: { "retry-after": "3600" } });
+  }
+
+  // Sender credential check — runs before the body is ever parsed. Phase 1 (see
+  // PROTOCOL.md): a present-but-wrong credential is rejected; an absent one still
+  // proceeds (migration window) so existing self-hosted servers keep working while
+  // they upgrade. Never logs the credential or any part of the request.
+  if (checkSenderCredential(request, env.SENDER_TOKEN) === "invalid") {
+    return Response.json({ error: "invalid sender credential" }, { status: 401 });
   }
 
   let body: unknown;
@@ -98,4 +112,37 @@ async function sendIos(
 export function intEnv(raw: string | undefined, fallback: number): number {
   const n = raw === undefined ? NaN : parseInt(raw, 10);
   return Number.isFinite(n) && n > 0 ? n : fallback;
+}
+
+export type SenderCredentialVerdict = "valid" | "invalid" | "absent";
+
+/**
+ * Phase-1 (optional→mandatory) sender-credential check for `/v1/send` — see
+ * PROTOCOL.md "Sender credential" for the two-phase rollout. Reads a bearer
+ * token from `Authorization`, compared against [expectedToken] (the
+ * `SENDER_TOKEN` wrangler secret) with a timing-safe equality check.
+ *
+ * [expectedToken] unset means this relay instance hasn't been provisioned with
+ * the secret yet (or predates this check entirely) — every call is then
+ * `"absent"`, never `"invalid"`, so deploying this code ahead of
+ * `wrangler secret put SENDER_TOKEN` can never break an existing caller.
+ */
+export function checkSenderCredential(request: Request, expectedToken: string | undefined): SenderCredentialVerdict {
+  if (!expectedToken) return "absent";
+
+  const header = request.headers.get("authorization");
+  if (header === null) return "absent"; // caller hasn't upgraded yet — migration window
+
+  if (!header.startsWith(BEARER_PREFIX)) return "invalid";
+  const provided = header.slice(BEARER_PREFIX.length);
+  return timingSafeEqualStrings(provided, expectedToken) ? "valid" : "invalid";
+}
+
+/** Constant-time string comparison (via Workers' `crypto.subtle.timingSafeEqual`) so a wrong guess can't be narrowed by response-time measurement. */
+function timingSafeEqualStrings(a: string, b: string): boolean {
+  const encoder = new TextEncoder();
+  const bufA = encoder.encode(a);
+  const bufB = encoder.encode(b);
+  if (bufA.byteLength !== bufB.byteLength) return false;
+  return crypto.subtle.timingSafeEqual(bufA, bufB);
 }
