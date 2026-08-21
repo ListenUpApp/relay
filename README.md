@@ -52,22 +52,27 @@ deploy your own instance.
    app's string catalog). Without the APNs secrets, `ios` tokens simply
    return `unsupported` (see PROTOCOL.md).
 
-4. **Recommended: authenticate your callers.** Set a shared secret every
-   self-hosted server presents as a bearer credential on `/v1/send` — see
-   [PROTOCOL.md § Sender credential](./PROTOCOL.md#sender-credential) for
-   the full two-phase (optional→mandatory) rollout and rotation guidance.
+4. **Optional: a shared sender credential.** Servers may present a bearer
+   credential on `/v1/send` — see
+   [PROTOCOL.md § Sender credential](./PROTOCOL.md#sender-credential) for what
+   it does and does not buy, and for rotation guidance.
 
    ```sh
    npx wrangler secret put SENDER_TOKEN
    # paste a long random value; the same value goes into every server's
-   # LISTENUP_PUSH_RELAY_TOKEN (or your fork's equivalent) env var
+   # LISTENUP_PUSH_SENDER_TOKEN (or your fork's equivalent) env var
    ```
 
-   Unset, every caller is currently still served (phase 1 — a request
-   without the header gets `200`, not rejected); this is a migration
-   window, not the end state. A request that *does* send the header but
-   gets it wrong is always rejected with `401`, whether or not you've set
-   this secret yet.
+   An absent credential is always served — that is the permanent behaviour, not
+   a migration window. A request that *does* send one and gets it wrong is
+   always rejected with `401`, whether or not this secret is set.
+
+   Read PROTOCOL.md before treating this as access control: because the official
+   apps can only be pushed to via this relay, a mandatory credential would have
+   to be distributed to every self-hoster, which makes it public. It is a
+   misconfiguration detector and a genuine shared key for deployments you run
+   yourself. **For volumetric abuse — the threat that actually risks your APNs
+   and FCM credentials — use a WAF rate rule (below), not this.**
 
 5. Deploy:
 

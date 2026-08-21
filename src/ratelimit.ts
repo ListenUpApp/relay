@@ -55,10 +55,24 @@ export class RateLimiter {
     const stamps = (this.hits.get(key) ?? []).filter((t) => t > cutoff);
 
     if (isNewKey && this.hits.size >= this.maxKeys) {
-      // Map iteration order is insertion order; `touch()` below re-inserts on every
-      // access, so the first entry is always the least-recently-touched one.
-      const oldest = this.hits.keys().next().value;
-      if (oldest !== undefined) this.hits.delete(oldest);
+      // Reclaim EXPIRED entries first — they are already spent, so dropping them costs nothing.
+      this.prune();
+      if (this.hits.size >= this.maxKeys) {
+        // Still full, and now full of LIVE counters. Do not evict one to make room: a caller
+        // presenting more distinct keys than `maxKeys` within a single window would otherwise
+        // roll the whole map and silently reset every other caller's counter — the per-token cap
+        // would stop applying to precisely the flood it exists to bound, and to everyone else as
+        // collateral. One request may carry MAX_TOKENS tokens, so reaching that volume takes no
+        // special effort.
+        //
+        // Instead the new key goes UNTRACKED and is allowed. That is a real concession — a flood
+        // is not per-token limited once the map is saturated — but it is the same concession the
+        // limiter already makes across isolates, and it confines the damage to the flood itself
+        // instead of handing the attacker an eraser for everybody's counters. Request volume is
+        // bounded separately by the per-IP limiter, and hard limits belong in a WAF rate rule
+        // (README § Rate limiting), which is the right place for an adversary.
+        return true;
+      }
     }
 
     if (stamps.length >= this.limit) {

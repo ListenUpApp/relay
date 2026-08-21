@@ -60,6 +60,28 @@ describe("RateLimiter", () => {
       expect(rl.size).toBe(3);
     });
 
+    it("does not let a flood of new keys reset a live counter", () => {
+      // The abuse this guards: a caller presenting more distinct keys than the cap in one window
+      // would otherwise roll the entire map, wiping every other caller's counter — so the
+      // per-token limit stops applying to exactly the flood it exists to bound.
+      const clock = { now: 1_000 };
+      const limiter = new RateLimiter({ limit: 1, windowMs: 60_000, maxKeys: 4, clock: () => clock.now });
+
+      expect(limiter.tryAcquire("victim")).toBe(true);
+      expect(limiter.tryAcquire("victim")).toBe(false); // at its cap, within the window
+
+      // Flood well past maxKeys with fresh keys, all inside the same window.
+      for (let i = 0; i < 50; i++) limiter.tryAcquire(`flood-${i}`);
+
+      // The victim is still capped: its live counter survived the flood.
+      expect(limiter.tryAcquire("victim")).toBe(false);
+      // And the flood itself is allowed through untracked rather than being counted against
+      // someone else's budget — the concession is confined to the flood.
+      expect(limiter.tryAcquire("flood-999")).toBe(true);
+      // The map never grows past the cap while doing it.
+      expect(limiter.size).toBeLessThanOrEqual(4);
+    });
+
     it("evicts the least-recently-touched key first", () => {
       let now = 0;
       const rl = new RateLimiter({ limit: 5, windowMs: 1_000_000, clock: () => now, maxKeys: 2 });
