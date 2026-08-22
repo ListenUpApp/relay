@@ -34,17 +34,49 @@ logged, compared in constant time). This is a **two-phase, optional→mandatory
 rollout**, tracked here so implementers and operators know exactly what to
 expect at each stage:
 
-| Phase | Credential absent | Credential present, wrong | Credential present, correct |
-|---|---|---|---|
-| **1 — current** | `200`, request proceeds (migration window) | `401` | `200`, request proceeds |
-| **2 — future, separate deploy** | `401` | `401` | `200`, request proceeds |
+| Credential absent | Credential present, wrong | Credential present, correct |
+|---|---|---|
+| `200`, request proceeds | `401` | `200`, request proceeds |
 
-Phase 1 lets every self-hosted server upgrade to sending the header on its
-own schedule without an outage — the relay accepts calls with or without it
-while operators roll the client-side change out. Phase 2 — flipping the
-"absent" column to `401` — only ships once every known caller has upgraded,
-and is deployed separately from the phase-1 relay code (never bundled with a
-client-side change, so there's no ordering hazard between the two).
+**This is the permanent behaviour, not a migration window.** An earlier version of
+this document described it as phase 1 of an optional→mandatory rollout, with a
+phase 2 that would reject an absent credential too. That phase will not ship, for
+two reasons found while implementing the caller side:
+
+1. **It cannot gatekeep.** ListenUp is self-hostable, but the official iOS and
+   Android apps are signed with ListenUp's own bundle id and FCM project — so
+   pushes to them can only be signed with ListenUp's `.p8` and service account,
+   which live here. A self-hoster therefore cannot run their own relay for the
+   official apps; every self-hosted server must call this one. Making the
+   credential mandatory means shipping it to every self-hoster, at which point it
+   is public by construction. A shared secret that every installer holds excludes
+   nobody who has installed the product once.
+2. **Its shipping condition is unmeasurable.** "Once every known caller has
+   upgraded" cannot be evaluated: this relay deliberately logs nothing about
+   callers (README § Logging), self-hosted operators are anonymous by design, and
+   in edge analytics an absent-credential `200` is indistinguishable from a
+   credentialed one. There is no signal that would ever say the gate is met.
+
+What the credential still earns, and why it stays:
+
+- **Misconfiguration detection.** A present-but-wrong credential fails loudly
+  (`401`) instead of silently, which is what catches a botched rotation.
+- **A real shared key for operator-run deployments.** For the servers the relay
+  operator runs themselves, the secret is not public and does gate access.
+- **A migration path already paid for.** Callers that send it cost nothing.
+
+Volumetric abuse — the threat that actually matters here, because sustained
+garbage traffic risks APNs/FCM credentials being throttled or revoked for every
+user of the official apps — is not a credential problem. Address it at the edge
+with a WAF rate rule (README § Rate limiting). The in-worker limiters are a
+courtesy backstop and say so.
+
+If per-sender identity is ever needed, the shape is per-server credentials minted
+at enrollment and stored in KV/D1 — which buys **attribution, per-sender rate
+limits, and revoking one abuser instead of rotating for everyone**. Note that
+even then, since enrollment must be open to self-hosters, it still does not
+gatekeep. That is a worthwhile trade the day an abuser exists, and a
+state-shaped cost against this worker's stateless design until then.
 
 If the relay itself has no `SENDER_TOKEN` secret configured at all (a fresh
 deploy, or a fork that hasn't opted in yet), every call — with or without a
@@ -238,7 +270,9 @@ returns `"unsupported"` — the pre-APNs behavior.
   may add an optional `ttl` (seconds) field to bound how long a provider
   should hold an undeliverable message. Until it exists, providers use
   their own defaults.
-- **Sender-credential phase 2.** See "Sender credential" above — flipping an
-  absent credential from `200` to `401` is a deliberate, separate relay
-  deploy gated on every known caller having upgraded, not part of this
-  revision.
+- **Per-server sender credentials.** See "Sender credential" above. The
+  previously-reserved "phase 2" (rejecting an absent credential) is withdrawn —
+  it cannot gatekeep an open self-hosted population and its shipping condition
+  was unmeasurable. If sender identity is ever needed, per-server credentials
+  with an enrollment registry are the shape, and they buy attribution and
+  revocation rather than exclusion.
