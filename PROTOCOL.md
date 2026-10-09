@@ -109,7 +109,7 @@ is no dual-secret grace window built into the relay itself (single
 
 | Field | Type | Required | Notes |
 |---|---|---|---|
-| `tokens` | array of `{ platform: "android" \| "ios", token: string }` | yes | 1–20 entries. |
+| `tokens` | array of `{ platform: "android" \| "ios", token: string }` | yes | 1–20 entries. For Android, `token` is the device's Firebase installation ID (apps on firebase-messaging 26+) or a legacy FCM registration token (older builds); the relay targets an installation ID through FCM's `fid` field and anything else through `token`. |
 | `payload` | object | yes | Opaque — the relay never interprets it. Forwarded verbatim to the push provider. |
 | `collapseKey` | string | no | Passed through to the provider's native collapse/coalescing mechanism where supported. |
 

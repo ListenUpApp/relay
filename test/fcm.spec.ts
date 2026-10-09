@@ -61,6 +61,40 @@ describe("FcmClient auth", () => {
 });
 
 describe("FcmClient send", () => {
+  it("targets a Firebase installation ID through fid, not the deprecated token field", async () => {
+    const { json } = await makeTestServiceAccount();
+    const upstream = fakeFetch([tokenResponse(), new Response("{}", { status: 200 })]);
+    const fcm = new FcmClient(json, upstream.fn);
+    const fid = "cXnEbS9aRWqZ3s0lYQb8_-"; // 22 url-safe base64 chars, first char c|d|e|f
+    expect(await fcm.send(fid, { t: 1 })).toBe("delivered");
+    const sent = JSON.parse(upstream.requests[1].body!);
+    expect(sent.message.fid).toBe(fid);
+    expect(sent.message.token).toBeUndefined();
+  });
+
+  it("keeps a legacy registration token from an older app in token", async () => {
+    const { json } = await makeTestServiceAccount();
+    const upstream = fakeFetch([tokenResponse(), new Response("{}", { status: 200 })]);
+    const fcm = new FcmClient(json, upstream.fn);
+    const legacy = "dXnEbS9aRWqZ3s0lYQb8_-:APA91bHPRgkF3JUikC4ENAHEeMrd41Zxv3hVZjC9KtT8OvPVGJ-hQMRKRrZuJAEcl7B338qju59zJMjw2DELjzEvxwYv7hH5Ynpc1ODQ0aT4U4OFEeco8ohsN5PjL1iC2dNtk2BAokeMCg2ZXKqpc8FXKmhX94kIxQ";
+    expect(await fcm.send(legacy, { t: 1 })).toBe("delivered");
+    const sent = JSON.parse(upstream.requests[1].body!);
+    expect(sent.message.token).toBe(legacy);
+    expect(sent.message.fid).toBeUndefined();
+  });
+
+  it("does not mistake a short legacy token, or 22 characters outside the FID alphabet, for an FID", async () => {
+    const { json } = await makeTestServiceAccount();
+    for (const notFid of ["tok-1", "aXnEbS9aRWqZ3s0lYQb8_-", "cXnEbS9aRWqZ3s0lYQb8:-"]) {
+      const upstream = fakeFetch([tokenResponse(), new Response("{}", { status: 200 })]);
+      const fcm = new FcmClient(json, upstream.fn);
+      await fcm.send(notFid, { t: 1 });
+      const sent = JSON.parse(upstream.requests[1].body!);
+      expect(sent.message.token).toBe(notFid);
+      expect(sent.message.fid).toBeUndefined();
+    }
+  });
+
   it("sends a HIGH-priority data message and maps 200 → delivered", async () => {
     const { json } = await makeTestServiceAccount();
     const upstream = fakeFetch([
