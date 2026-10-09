@@ -21,6 +21,22 @@ function pemToPkcs8(pem: string): ArrayBuffer {
 }
 
 /**
+ * A Firebase installation ID (FID): 22 url-safe base64 characters whose first four bits are 0111,
+ * so the first character is always c, d, e or f. A legacy FCM registration token is far longer and
+ * carries a `:`, so the two never collide.
+ */
+const FID = /^[c-f][A-Za-z0-9_-]{21}$/;
+
+/**
+ * Where FCM v1 should deliver to `id`. Apps on firebase-messaging 26 register by installation ID,
+ * which goes in `fid`; `token` is deprecated (it accepts FIDs only during Google's transition) and
+ * stays for registration tokens from older app builds until those devices update.
+ */
+export function fcmTarget(id: string): { fid: string } | { token: string } {
+  return FID.test(id) ? { fid: id } : { token: id };
+}
+
+/**
  * FCM v1 client: mints OAuth access tokens from a Google service-account key
  * and sends data-only messages.
  * Auth signs an RS256 JWT with WebCrypto and trades it for an access token at
@@ -106,7 +122,7 @@ export class FcmClient {
       method: "POST",
       headers: { authorization: `Bearer ${accessToken}`, "content-type": "application/json" },
       body: JSON.stringify({
-        message: { token, data: { payload: JSON.stringify(payload) }, android },
+        message: { ...fcmTarget(token), data: { payload: JSON.stringify(payload) }, android },
       }),
     });
     if (res.ok) return "delivered";
